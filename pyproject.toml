@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ai-cycle"
+version = "1.0.0"
+description = "Multi-agent AI coding cycle orchestrator"
+requires-python = ">=3.11"
+dependencies = [
+    "typer>=0.15",
+    "rich>=13.0",
+]
+
+[project.scripts]
+ai-cycle = "ai_cycle.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ai_cycle"]
