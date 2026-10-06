@@ -1,15 +1,16 @@
 from __future__ import annotations
 
+import os
+import subprocess
 import tempfile
 from pathlib import Path
 
-from ai_cycle.core.config import write
 from ai_cycle.core.runner import die, run
 
 REVIEW_INSTRUCTIONS = """
 You are REVIEWER B (Claude Code CLI), an INDEPENDENT adversarial code reviewer.
 
-Read SPEC.md, RULES.md, and DIFF.patch in this workspace directory.
+Review the SPEC, RULES, and DIFF supplied below.
 You did NOT see the implementer's reasoning and must not assume the change is correct.
 
 CLASSIFICATION RULES
@@ -57,21 +58,37 @@ VERDICT: CHANGES_REQUIRED
 """.strip()
 
 
-def claude_review(spec: str, rules: str, diff: str, run_dir: Path) -> str:
-    # Isolate Claude Code from the real repo. It only receives review artifacts.
+def claude_review(spec: str, rules: str, diff: str, run_dir: Path, model: str | None = None) -> str:
+    # Isolate Claude Code from the real repo and keep review to one model call.
     with tempfile.TemporaryDirectory(prefix="ai-cycle-review-") as td:
         box = Path(td)
-        write(box / "SPEC.md", spec)
-        write(box / "RULES.md", rules)
-        write(box / "DIFF.patch", diff)
+        prompt = f"{REVIEW_INSTRUCTIONS}\n\nSPEC:\n{spec}\n\nRULES:\n{rules}\n\nDIFF:\n{diff}"
 
         cmd = [
-            "claude", "--model", "kr/claude-opus-5", "-p", REVIEW_INSTRUCTIONS,
-            "--dangerously-skip-permissions",
+            "claude",
+            "--model",
+            os.getenv("AI_CYCLE_REVIEW_MODEL") or model or "kr/claude-opus-5",
+            "-p",
+            "--safe-mode",
+            "--tools",
+            "",
+            "--no-session-persistence",
+            "--effort",
+            "low",
+            "--output-format",
+            "text",
         ]
-        p = run(cmd, cwd=box)
-
-        write(run_dir / "review-claude.txt", p.stdout)
+        try:
+            p = run(
+                cmd,
+                cwd=box,
+                input_text=prompt,
+                timeout=120,
+                quiet=True,
+                output_path=run_dir / "review-claude.txt",
+            )
+        except subprocess.TimeoutExpired:
+            die("Claude reviewer timed out after 120s. Check 9Router or choose another review_model.")
         if p.returncode != 0:
             die(f"Claude Code reviewer failed:\n{p.stdout.strip()}")
         return p.stdout

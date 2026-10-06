@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import subprocess
-from concurrent.futures import ThreadPoolExecutor
+import json
 from pathlib import Path
 
 from rich.console import Console
@@ -9,7 +9,6 @@ from rich.live import Live
 
 from ai_cycle.agents.claude import claude_review
 from ai_cycle.agents.codex import codex_implement
-from ai_cycle.agents.copilot import copilot_review
 from ai_cycle.agents.postmortem import propose_rule
 from ai_cycle.core.config import get_project_paths, load_config, read, write
 from ai_cycle.core.git import assert_clean_worktree, assert_git_repo, current_branch, get_diff
@@ -19,26 +18,43 @@ from ai_cycle.resume import load_previous_feedback, sha256_text
 from ai_cycle.ui.panels import render_header, render_verdict_table
 from ai_cycle.ui.progress import CycleProgress
 
+MAX_REVIEW_DIFF_BYTES = 1_000_000
 
-def build_feedback(copilot: str, claude: str, validation_log: str | None = None) -> str:
+
+def build_feedback(claude: str, validation_log: str | None = None) -> str:
     parts = []
-    if parse_verdict(copilot) != "PASS":
-        parts.append("COPILOT REVIEW:\n" + copilot)
-    if parse_verdict(claude) != "PASS":
-        parts.append("CLAUDE CODE REVIEW:\n" + claude)
+    if claude and parse_verdict(claude) != "PASS":
+        parts.append("CLAUDE CODE REVIEW:\n" + compact_review(claude))
     if validation_log:
         parts.append("VALIDATION OUTPUT:\n" + validation_log)
     return "\n\n".join(parts)
 
 
-def run_validation(commands: list[str], run_dir: Path, cwd: Path) -> bool:
+def compact_review(text: str) -> str:
+    """Return the structured reviewer JSON when present; it is enough for retries."""
+    try:
+        if "```json" in text:
+            return json.dumps(json.loads(text.split("```json")[1].split("```")[0].strip()), indent=2)
+        if "{" in text and "}" in text:
+            start = text.find("{")
+            end = text.rfind("}")
+            return json.dumps(json.loads(text[start : end + 1]), indent=2)
+    except Exception:
+        pass
+    return text.strip()
+
+
+def run_validation(commands: list[str], run_dir: Path, cwd: Path, progress=None) -> bool:
     from ai_cycle.core.runner import run as run_cmd
 
     logs = []
     ok = True
-    for raw in commands:
+    for index, raw in enumerate(commands, 1):
         cmd = ["bash", "-lc", raw]
-        p = run_cmd(cmd, cwd=cwd, timeout=1800)
+        log_path = run_dir / f"validation-command-{index}.txt"
+        if progress:
+            progress.log_path = log_path
+        p = run_cmd(cmd, cwd=cwd, timeout=1800, output_path=log_path)
         logs.append(f"$ {raw}\n{p.stdout}\n[exit={p.returncode}]\n")
         if p.returncode != 0:
             ok = False
@@ -57,7 +73,7 @@ def execute_cycle(
     paths = get_project_paths(root)
     state, runs = paths["state"], paths["runs"]
 
-    require_commands(["git", "codex", "copilot", "claude", "bash"])
+    require_commands(["git", "codex", "claude", "bash"])
     assert_git_repo(root)
     assert_clean_worktree(root, allow_dirty)
 
@@ -66,6 +82,8 @@ def execute_cycle(
     cfg = load_config(state)
     max_attempts = max_attempts or int(cfg.get("max_attempts", 2))
     validation_commands = cfg.get("validation_commands", [])
+    base_branch = cfg.get("base_branch")
+    review_model = cfg.get("review_model")
 
     spec_path = state / "spec.md"
     rules_path = state / "RULES.md"
@@ -104,39 +122,57 @@ def execute_cycle(
 
         progress = CycleProgress(console)
         progress.add_stage("🔧 Codex Implementer")
-        progress.add_stage("🔍 Copilot Review")
+        progress.add_stage("✅ Validation")
         progress.add_stage("🔍 Claude Review")
 
-        with Live(progress.render(), console=console, refresh_per_second=1) as live:
-            progress.start_stage("🔧 Codex Implementer")
+        with Live(get_renderable=progress.render, console=console, refresh_per_second=4) as live:
+            progress.start_stage("🔧 Codex Implementer", run_dir / "implementer.txt")
             live.update(progress.render())
             codex_implement(spec, rules, feedback, run_dir, root)
             progress.complete_stage("🔧 Codex Implementer")
             live.update(progress.render())
 
-            diff = get_diff(root)
+            diff = get_diff(root, base_branch)
             write(run_dir / "diff.patch", diff)
+            diff_bytes = len(diff.encode("utf-8"))
+            if diff_bytes > MAX_REVIEW_DIFF_BYTES:
+                die(
+                    f"Review diff is too large ({diff_bytes / 1_000_000:.1f} MB). "
+                    "Commit unrelated changes or fix base_branch in .ai-cycle/config.json. "
+                    f"See {run_dir / 'diff.patch'}"
+                )
 
-            progress.start_stage("🔍 Copilot Review")
-            progress.start_stage("🔍 Claude Review")
+            progress.start_stage("✅ Validation")
+            live.update(progress.render())
+            validation_ok = run_validation(validation_commands, run_dir, root, progress)
+            progress.complete_stage("✅ Validation", success=validation_ok)
             live.update(progress.render())
 
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                f_copilot = executor.submit(copilot_review, spec, rules, diff, run_dir, root)
-                f_claude = executor.submit(claude_review, spec, rules, diff, run_dir)
-                copilot = f_copilot.result()
-                claude = f_claude.result()
+            if not validation_ok:
+                validation_log = read(run_dir / "validation.txt")
+                feedback = build_feedback("", validation_log)
+                write(run_dir / "feedback.txt", feedback)
+                if attempt < max_attempts:
+                    continue
+                write(base_run / "terminal-feedback.txt", feedback)
+                if cfg.get("postmortem", False):
+                    with console.status("Postmortem: generating rule proposal..."):
+                        propose_rule(spec, feedback, run_dir, root)
+                die(f"Validation failed after {max_attempts} attempt(s). See {run_dir}")
 
-            progress.complete_stage("🔍 Copilot Review")
-            progress.complete_stage("🔍 Claude Review")
+            progress.start_stage("🔍 Claude Review", run_dir / "review-claude.txt")
             live.update(progress.render())
 
-        cv = parse_verdict(copilot)
+            claude = claude_review(spec, rules, diff, run_dir, model=review_model)
+
+            progress.complete_stage("🔍 Claude Review", success=parse_verdict(claude) == "PASS")
+            live.update(progress.render())
+
         clv = parse_verdict(claude)
-        render_verdict_table(console, cv, clv)
+        render_verdict_table(console, clv)
 
-        if cv == "NEEDS_HUMAN" or clv == "NEEDS_HUMAN":
-            feedback = build_feedback(copilot, claude)
+        if clv == "NEEDS_HUMAN":
+            feedback = build_feedback(claude)
             write(run_dir / "spec-questions.txt", feedback)
             console.print("\n[bold yellow]========== STOPPED FOR HUMAN DECISION (NEEDS_HUMAN) ==========[/bold yellow]")
             console.print("One or more reviewers identified a spec ambiguity or product architecture conflict.")
@@ -144,33 +180,21 @@ def execute_cycle(
             console.print("Please review and resolve the question in .ai-cycle/spec.md before re-running.")
             return
 
-        if cv != "PASS" or clv != "PASS":
-            feedback = build_feedback(copilot, claude)
+        if clv != "PASS":
+            feedback = build_feedback(claude)
             write(run_dir / "feedback.txt", feedback)
             if attempt < max_attempts:
                 continue
             write(base_run / "terminal-feedback.txt", feedback)
-            propose_rule(spec, feedback, run_dir, root)
+            if cfg.get("postmortem", False):
+                with console.status("Postmortem: generating rule proposal..."):
+                    propose_rule(spec, feedback, run_dir, root)
             die(f"Review failed after {max_attempts} attempt(s). See {run_dir}")
-
-        console.rule("DETERMINISTIC VALIDATION")
-        validation_ok = run_validation(validation_commands, run_dir, root)
-        validation_log = read(run_dir / "validation.txt")
-
-        if not validation_ok:
-            feedback = build_feedback(copilot, claude, validation_log)
-            write(run_dir / "feedback.txt", feedback)
-            if attempt < max_attempts:
-                continue
-            write(base_run / "terminal-feedback.txt", feedback)
-            propose_rule(spec, feedback, run_dir, root)
-            die(f"Validation failed after {max_attempts} attempt(s). See {run_dir}")
 
         console.rule("HUMAN ACCEPTANCE GATE")
         console.print("Automated cycle passed.")
         console.print("Review the actual behavior and git diff yourself:")
         console.print("  git diff")
-        console.print(f"  cat {run_dir / 'review-copilot.txt'}")
         console.print(f"  cat {run_dir / 'review-claude.txt'}")
         console.print(f"  cat {run_dir / 'validation.txt'}")
         console.print("\nNo commit or push was performed.")

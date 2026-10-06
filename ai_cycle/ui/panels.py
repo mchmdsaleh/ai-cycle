@@ -31,8 +31,8 @@ def render_header(console: Console, branch: str, spec_hash: str, resume_info: st
     console.print(Panel("\n".join(lines), expand=False))
 
 
-def render_verdict_table(console: Console, copilot_verdict: str, claude_verdict: str, blockers: int = 0, spec_questions: int = 0):
-    table = Table(title="📊 Review Verdicts", show_header=False)
+def render_verdict_table(console: Console, claude_verdict: str, blockers: int = 0, spec_questions: int = 0):
+    table = Table(title="📊 Review Verdict", show_header=False)
     table.add_column("Reviewer")
     table.add_column("Verdict")
 
@@ -40,8 +40,7 @@ def render_verdict_table(console: Console, copilot_verdict: str, claude_verdict:
         icon = "✅" if v == "PASS" else ("⚠️" if v == "NEEDS_HUMAN" else "❌")
         return f"[{VERDICT_STYLE.get(v, 'dim')}]{icon} {v}[/{VERDICT_STYLE.get(v, 'dim')}]"
 
-    table.add_row("Copilot (GPT)", styled(copilot_verdict))
-    table.add_row("Claude (Opus 5)", styled(claude_verdict))
+    table.add_row("Claude", styled(claude_verdict))
     console.print(table)
     console.print(f"[dim]Blockers: {blockers}  |  Spec Questions: {spec_questions}[/dim]")
 

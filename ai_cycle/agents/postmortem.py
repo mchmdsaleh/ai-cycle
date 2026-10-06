@@ -31,15 +31,8 @@ REASON:
 <why this is systemic rather than a one-off typo>
 """.strip()
 
-    with tempfile.NamedTemporaryFile("w+", suffix="-prompt.txt", encoding="utf-8") as tf:
-        tf.write(prompt)
-        tf.flush()
-        p = run(
-            [
-                "copilot", "-s", "-p", f"@{tf.name}",
-                "--available-tools=view,grep,glob",
-                "--deny-tool=write",
-            ],
-            cwd=cwd,
-        )
+    with tempfile.TemporaryDirectory(prefix="ai-cycle-postmortem-") as td:
+        box = Path(td)
+        cmd = ["claude", "--model", "kr/claude-opus-5", "-p", prompt, "--dangerously-skip-permissions"]
+        p = run(cmd, cwd=box)
         write(run_dir / "rule-proposal.txt", p.stdout)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import shlex
 import shutil
 import subprocess
+from pathlib import Path
 
 from rich.console import Console
 
@@ -20,20 +21,30 @@ def require_commands(names: list[str]):
         die("Missing required command(s): " + ", ".join(missing))
 
 
-def run(cmd, *, cwd=None, input_text=None, timeout=1800, env=None, check=False, quiet=False):
+def run(cmd, *, cwd=None, input_text=None, timeout=1800, env=None, check=False, quiet=False, output_path=None):
     """Run a subprocess with rich-formatted echo of the command line."""
     if not quiet:
         console.print(f"[dim]$ {' '.join(shlex.quote(str(x)) for x in cmd)}[/dim]")
-    proc = subprocess.run(
-        [str(x) for x in cmd],
-        cwd=str(cwd) if cwd else None,
-        input=input_text,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        timeout=timeout,
-        env=env,
-    )
+    if output_path is not None:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with output_path.open("w", encoding="utf-8") as log:
+            proc = subprocess.run(
+                [str(x) for x in cmd], cwd=cwd, input=input_text, text=True,
+                stdout=log, stderr=subprocess.STDOUT, timeout=timeout, env=env,
+            )
+        proc.stdout = output_path.read_text(encoding="utf-8", errors="replace")
+    else:
+        proc = subprocess.run(
+            [str(x) for x in cmd],
+            cwd=str(cwd) if cwd else None,
+            input=input_text,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=timeout,
+            env=env,
+        )
     if check and proc.returncode != 0:
         console.print(proc.stdout)
         die(f"Command failed with exit code {proc.returncode}: {cmd[0]}")

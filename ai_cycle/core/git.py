@@ -31,19 +31,42 @@ def current_branch(root: Path) -> str:
     return git("rev-parse", "--abbrev-ref", "HEAD", cwd=root).stdout.strip()
 
 
-def get_diff(root: Path) -> str:
-    base_branch = "origin/main"
-    if git("rev-parse", "--verify", "origin/main", cwd=root, check=False).returncode != 0:
-        base_branch = "main"
+def resolve_base_branch(root: Path, base_branch: str | None = None) -> str:
+    """Resolve the branch to diff against: explicit config value takes
+    priority. Otherwise fall back to origin/main, then main. Set
+    "base_branch" in .ai-cycle/config.json for repos whose integration
+    branch isn't main (e.g. "development")."""
+    candidates = [base_branch] if base_branch else []
+    candidates += ["origin/main", "main"]
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+        ref = candidate
+        if "/" not in ref and git("rev-parse", "--verify", f"origin/{ref}", cwd=root, check=False).returncode == 0:
+            ref = f"origin/{ref}"
+        if git("rev-parse", "--verify", ref, cwd=root, check=False).returncode == 0:
+            return ref
+
+    die(f"Could not resolve a base branch to diff against (tried: {candidates}).")
+
+
+def get_diff(root: Path, base_branch: str | None = None) -> str:
+    diff_base = "HEAD"
+    if base_branch:
+        base_ref = resolve_base_branch(root, base_branch)
+        merge_base = git("merge-base", "HEAD", base_ref, cwd=root, check=False).stdout.strip()
+        diff_base = merge_base or base_ref
 
     chunks = []
 
-    base_diff = run(["git", "diff", base_branch, "--no-ext-diff", "--binary"], cwd=root).stdout
+    paths = ["--", ".", ":(top,exclude).ai-cycle"]
+    base_diff = run(["git", "diff", diff_base, "--no-ext-diff", "--binary", *paths], cwd=root).stdout
     if base_diff.strip():
         chunks.append(base_diff)
 
     untracked_files = run(
-        ["git", "ls-files", "--others", "--exclude-standard"], cwd=root
+        ["git", "ls-files", "--others", "--exclude-standard", *paths], cwd=root
     ).stdout.splitlines()
 
     for rel_path in untracked_files:

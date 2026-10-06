@@ -7,6 +7,8 @@ from ai_cycle.core.runner import die
 
 DEFAULT_CONFIG = {
     "max_attempts": 2,
+    "base_branch": None,
+    "review_model": "kr/claude-opus-5",
     "validation_commands": [],
 }
 
