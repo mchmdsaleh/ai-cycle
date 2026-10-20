@@ -1,0 +1,44 @@
+name: odoo-spec-driven
+version: 1
+description: Odoo requirements, technical design, wireframe, tasks and business readiness
+artifacts:
+  - id: proposal
+    generates: proposal.md
+    description: Business goal, scope and decisions
+    template: proposal.md
+    instruction: Preserve explicit requirements. List new/modified capabilities and unresolved business questions. Read existing capability specs before proposing changes.
+    requires: []
+  - id: specs
+    generates: "specs/**/*.md"
+    description: Observable requirements and scenarios
+    template: spec.md
+    instruction: Use OpenSpec ADDED/MODIFIED/REMOVED Requirements with SHALL/MUST and WHEN/THEN scenarios. Each requirement needs a scenario. For MODIFIED copy the full existing requirement and preserve unchanged scenarios. Never invent a product decision. Include Purpose for new capabilities.
+    requires: [proposal]
+  - id: design
+    generates: design.md
+    description: Verified Odoo technical specification
+    template: design.md
+    instruction: Follow the supplied Odoo Technical Analyst instructions. Verify model, fields, XML IDs, hooks, version, ACL and record rules in source. Label unverified names Proposed/TBD. Explain migration and tests using actual impact.
+    requires: [proposal, specs]
+  - id: wireframe
+    generates: wireframe.md
+    description: UI layout and interaction states
+    template: wireframe.md
+    instruction: Follow supplied wireframes and repository UI patterns. Show a compact text wireframe and navigation, loading, empty, error and success states when relevant. Do not add features. Write Not applicable for changes without UI impact.
+    requires: [specs, design]
+  - id: tasks
+    generates: tasks.md
+    description: Implementation and verification checklist
+    template: tasks.md
+    instruction: Use numbered unchecked tasks with verification per task. Scale to complexity. Preserve already completed tasks on revision unless the new requirement invalidates them. Archive/UAT follow-up must not imply tests were performed.
+    requires: [specs, design, wireframe]
+  - id: readiness
+    generates: readiness.json
+    description: Machine-readable unresolved business blockers
+    template: readiness.json
+    instruction: Write JSON with status draft or ready and blockers array for the explicitly selected implementation scope. Missing decisions affecting that scope are blockers. User-deferred decisions and all dependent requirements must remain excluded from implementation; retain them in deferredDecisions, not blockers. Ready requires zero active blockers. Never defer without explicit user authorization or infer human approval from generated artifacts.
+    requires: [proposal, specs, design, wireframe, tasks]
+apply:
+  requires: [tasks, readiness]
+  tracks: tasks.md
+  instruction: Read readiness.json; stop for draft or blockers. Implement the requirements and pending tasks. Mark only verified completed tasks. Preserve requirements and do not archive automatically.

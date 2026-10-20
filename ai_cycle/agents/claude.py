@@ -83,12 +83,12 @@ def claude_review(spec: str, rules: str, diff: str, run_dir: Path, model: str | 
                 cmd,
                 cwd=box,
                 input_text=prompt,
-                timeout=120,
+                timeout=300,
                 quiet=True,
                 output_path=run_dir / "review-claude.txt",
             )
         except subprocess.TimeoutExpired:
-            die("Claude reviewer timed out after 120s. Check 9Router or choose another review_model.")
+            die("Claude reviewer timed out after 300s. Check 9Router or choose another review_model.")
         if p.returncode != 0:
             die(f"Claude Code reviewer failed:\n{p.stdout.strip()}")
         return p.stdout

@@ -20,7 +20,7 @@ def cheatsheet():
     """Print panduan singkat penggunaan ai-cycle."""
     console.print("""AI-CYCLE CHEATSHEET
 
-Alur: Codex implement -> validasi -> Claude review -> cek manual.
+Alur: implementer (default Codex) -> validasi -> Claude review -> cek manual.
 Jalankan cycle dari root repo Git. Command cheatsheet bisa dari mana saja.
 
 MULAI PAKAI
@@ -37,6 +37,8 @@ PERINTAH HARIAN
   ai-cycle run                         Mulai tanpa feedback sebelumnya
   ai-cycle run --max-attempts 1         Batasi satu percobaan
   ai-cycle run --allow-dirty            Izinkan perubahan belum di-commit
+  ai-cycle run --implementer agy        Gunakan Antigravity CLI
+  Config permanen: "implementer": "agy" (default: "codex").
   ai-cycle run --resume --allow-dirty   Gunakan feedback kegagalan sebelumnya
   ai-cycle spec "Buat fitur..."          Buat spec.md dalam plan mode
   ai-cycle spec --input ./docs/file.pdf Buat spec.md dari dokumen
@@ -50,6 +52,8 @@ PERINTAH HARIAN
   run biasa tidak membawa feedback lama atau menghapus perubahan sebelumnya.
 
 SPEC GENERATOR
+  ai-cycle spec "Buat fitur..." --change nama-fitur   Buat/revisi OpenSpec
+  ai-cycle run --change nama-fitur --allow-dirty     Implement OpenSpec
   Jalankan dari root repository Git:
   ai-cycle spec "Buat fitur hierarchy subtask"
   ai-cycle spec --input ./docs/wireframe.pdf
@@ -60,6 +64,31 @@ SPEC GENERATOR
   instruction Odoo Technical Analyst dari ai_cycle/SPEC_INSTRUCTIONS.md.
   Hasil ditulis ke .ai-cycle/spec.md hanya setelah proses sukses. Periksa spec,
   selesaikan blocker/TBD, lalu jalankan ai-cycle run.
+
+PILIH IMPLEMENTER
+  Prioritas: --implementer > config implementer > default codex.
+  Tanpa flag/config: Codex yang implementasi.
+  Sekali run dengan Antigravity:
+  ai-cycle run --change c4 --implementer agy --allow-dirty
+  Permanen: tambahkan "implementer": "agy" ke .ai-cycle/config.json;
+  pertahankan setting lain. Kemudian run tanpa --implementer memakai agy.
+  Override kembali ke Codex untuk satu run:
+  ai-cycle run --change c4 --implementer codex --allow-dirty
+  Flag yang sama berlaku pada legacy run tanpa --change.
+  agy harus terpasang dan sudah login; model mengikuti konfigurasi agy.
+  Mode agy: print + accept-edits + sandbox; permission tidak di-bypass.
+  Planner spec tetap Codex, reviewer tetap Claude. Log: implementer.txt.
+
+OPENSPEC (install: npm install -g @fission-ai/openspec)
+  ai-cycle spec "Generate payment CSV Mandiri" --change mandiri-payment-export
+  ai-cycle spec "Jawaban: D2 pakai Nama Rekening, kosong harus error" --change mandiri-payment-export
+  Periksa openspec/changes/mandiri-payment-export/ dan readiness.json.
+  Status draft atau blockers belum kosong akan menghentikan run sebelum agent.
+  ai-cycle run --change mandiri-payment-export --allow-dirty
+  ai-cycle run --change mandiri-payment-export --resume --allow-dirty
+  openspec status --change mandiri-payment-export
+  Setelah review dan UAT: openspec archive mandiri-payment-export
+  Requirement terbaru tidak memakai feedback lama yang hash-nya berbeda.
 
 CONFIG CONTOH (.ai-cycle/config.json)
   Sesuaikan branch dan command validasi dengan proyek:
@@ -105,8 +134,9 @@ def spec(
         None, "--input", exists=True, file_okay=True, dir_okay=False,
         readable=True, resolve_path=True, help="Document or artifact to inspect",
     ),
+    change: Optional[str] = typer.Option(None, "--change", help="Create or revise an OpenSpec change (kebab-case)"),
 ):
-    """Generate .ai-cycle/spec.md with Codex in plan mode."""
+    """Plan a legacy spec or an OpenSpec change with Codex (read-only)."""
     if not request and not input_path:
         raise typer.BadParameter("Provide a request or --input FILE")
 
@@ -119,6 +149,21 @@ def spec(
     require_commands(["git", "codex"])
     assert_git_repo(root)
     initialize_project(root)
+    if change:
+        from ai_cycle.core.openspec import ARTIFACTS, openspec, prepare_change, save_artifacts
+        path = prepare_change(root, change)
+        context = "\n\n".join(openspec(root, "instructions", artifact, "--change", change, "--json") for artifact in ARTIFACTS)
+        existing = sorted(path.rglob("*.md"))
+        if (path / "readiness.json").exists():
+            existing.append(path / "readiness.json")
+        context += "\n\nExisting artifacts to reconcile:\n" + "\n\n".join(f"{item.relative_to(path)}:\n{item.read_text()}" for item in existing)
+        with console.status("[bold]Planning OpenSpec change with Codex..."):
+            generated = codex_plan_spec(request, input_path, root, planning_context=context)
+        save_artifacts(path, generated)
+        openspec(root, "validate", change, "--strict")
+        console.print(f"[green]OpenSpec change written:[/green] {path}")
+        console.print((path / "readiness.json").read_text())
+        return
     with console.status("[bold]Planning spec with Codex...[/bold]"):
         generated = codex_plan_spec(request, input_path, root)
     spec_path = get_project_paths(root)["state"] / "spec.md"
@@ -131,11 +176,13 @@ def run(
     resume: bool = typer.Option(False, help="Resume from latest failed run"),
     allow_dirty: bool = typer.Option(False, help="Allow dirty working tree"),
     max_attempts: Optional[int] = typer.Option(None, help="Override max attempts"),
+    change: Optional[str] = typer.Option(None, "--change", help="Implement this OpenSpec change"),
+    implementer: Optional[str] = typer.Option(None, "--implementer", help="Override implementer: codex or agy"),
 ):
     """🚀 Run the AI coding cycle"""
     from ai_cycle.orchestrator import execute_cycle
 
-    execute_cycle(resume=resume, allow_dirty=allow_dirty, max_attempts=max_attempts)
+    execute_cycle(resume=resume, allow_dirty=allow_dirty, max_attempts=max_attempts, change=change, implementer=implementer)
 
 
 @app.command()

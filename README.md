@@ -135,3 +135,50 @@ Untuk ringkasan command langsung di terminal:
 ```bash
 ai-cycle cheatsheet
 ```
+## OpenSpec Workflow
+
+Implementer dapat dipilih dengan `ai-cycle run --implementer agy` atau setting
+`"implementer": "agy"` pada `.ai-cycle/config.json`. Default tetap `codex`;
+flag CLI mengalahkan config. Contoh C4:
+
+```bash
+ai-cycle run --change c4 --implementer agy --allow-dirty
+```
+
+Antigravity memerlukan CLI `agy` yang sudah login. AI Cycle memakai print mode,
+`accept-edits`, dan sandbox tanpa bypass permission. Model mengikuti konfigurasi
+Antigravity. Spec planner tetap memerlukan Codex, reviewer tetap Claude; jika
+postmortem diaktifkan, Codex juga diperlukan. Log tetap `implementer.txt`.
+
+Prioritas pemilihan: `--implementer` > `implementer` di config > `codex`.
+Tanpa flag maupun config, implementasi tetap menggunakan Codex. Untuk memilih
+Antigravity secara permanen, tambahkan `"implementer": "agy"` ke JSON existing
+tanpa menghapus setting lainnya. Setelah itu run biasa memakai Antigravity;
+override satu run kembali ke Codex dengan:
+
+```bash
+ai-cycle run --change c4 --implementer codex --allow-dirty
+```
+
+Opsi yang sama berlaku untuk legacy `ai-cycle run` tanpa `--change`.
+
+Panduan lengkap dan contoh Mandiri CSV tersedia di [OpenSpec + AI Cycle](docs/openspec-workflow.md).
+
+```bash
+npm install -g @fission-ai/openspec
+ai-cycle spec "Generate payment CSV Mandiri" --input ./docs/mandiri.pdf --change mandiri-payment-export
+ai-cycle spec "Jawaban blocker: ..." --change mandiri-payment-export
+ai-cycle run --change mandiri-payment-export --allow-dirty
+```
+
+`--change` memakai artifact OpenSpec sebagai source of truth. Schema Odoo,
+wireframe, tasks, dan readiness dibuat pada penggunaan pertama. Draft/blockers
+menghentikan implementasi sebelum agent berjalan. Command tanpa `--change`
+tetap memakai `.ai-cycle/spec.md`. Archive dilakukan manual setelah review/UAT.
+
+## Planned Improvements
+
+Rencana stage persistence, resume tanpa mengulang implementasi, retry reviewer,
+alasan berhenti yang eksplisit, dan animasi progress terinspirasi Ruflo tersedia
+di [Execution Recovery and Progress Plan](docs/execution-recovery-plan.md).
+Fitur pada dokumen tersebut masih berstatus planned.

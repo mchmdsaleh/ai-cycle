@@ -67,19 +67,26 @@ def execute_cycle(
     allow_dirty: bool = False,
     max_attempts: int | None = None,
     root: Path | None = None,
+    change: str | None = None,
+    implementer: str | None = None,
 ):
     console = Console()
     root = root or Path.cwd()
     paths = get_project_paths(root)
     state, runs = paths["state"], paths["runs"]
 
-    require_commands(["git", "codex", "claude", "bash"])
+    require_commands(["git", "bash"])
     assert_git_repo(root)
     assert_clean_worktree(root, allow_dirty)
 
     branch = current_branch(root)
 
     cfg = load_config(state)
+    implementer = implementer or cfg.get("implementer", "codex")
+    if implementer not in ("codex", "agy"):
+        die("Unknown implementer. Choose codex or agy.")
+    require_commands([implementer, "claude"] + (["codex"] if cfg.get("postmortem", False) and implementer != "codex" else []))
+    implementer_stage = "🔧 Antigravity Implementer" if implementer == "agy" else "🔧 Codex Implementer"
     max_attempts = max_attempts or int(cfg.get("max_attempts", 2))
     validation_commands = cfg.get("validation_commands", [])
     base_branch = cfg.get("base_branch")
@@ -87,10 +94,17 @@ def execute_cycle(
 
     spec_path = state / "spec.md"
     rules_path = state / "RULES.md"
-    if not spec_path.exists() or not rules_path.exists():
+    if (not change and not spec_path.exists()) or not rules_path.exists():
         die("Missing .ai-cycle/spec.md or .ai-cycle/RULES.md")
 
-    spec = read(spec_path)
+    if change:
+        from ai_cycle.core.openspec import change_path, load_change, openspec
+        spec = load_change(root, change)
+        openspec(root, "validate", change, "--strict")
+        task_path = change_path(root, change) / "tasks.md"
+    else:
+        spec = read(spec_path)
+        task_path = None
     rules = read(rules_path)
 
     runs.mkdir(parents=True, exist_ok=True)
@@ -99,6 +113,9 @@ def execute_cycle(
     base_run.mkdir()
 
     metadata = {"branch": branch, "spec_hash": sha256_text(spec)}
+    metadata["implementer"] = implementer
+    if change:
+        metadata["change"] = change
     write(base_run / "metadata.json", __import__("json").dumps(metadata, indent=2))
 
     feedback = None
@@ -121,15 +138,22 @@ def execute_cycle(
         run_dir.mkdir()
 
         progress = CycleProgress(console)
-        progress.add_stage("🔧 Codex Implementer")
+        progress.add_stage(implementer_stage)
         progress.add_stage("✅ Validation")
         progress.add_stage("🔍 Claude Review")
 
         with Live(get_renderable=progress.render, console=console, refresh_per_second=4) as live:
-            progress.start_stage("🔧 Codex Implementer", run_dir / "implementer.txt")
+            progress.start_stage(implementer_stage, run_dir / "implementer.txt")
             live.update(progress.render())
-            codex_implement(spec, rules, feedback, run_dir, root)
-            progress.complete_stage("🔧 Codex Implementer")
+            if task_path:
+                codex_implement(spec, rules, feedback, run_dir, root, task_path=task_path, implementer=implementer)
+            else:
+                codex_implement(spec, rules, feedback, run_dir, root, implementer=implementer)
+            if change and load_change(root, change) != spec:
+                progress.complete_stage(implementer_stage, success=False)
+                live.update(progress.render())
+                die("OpenSpec planning artifacts changed during implementation. Review the changes and re-run planning before continuing.")
+            progress.complete_stage(implementer_stage)
             live.update(progress.render())
 
             diff = get_diff(root, base_branch)
@@ -177,7 +201,7 @@ def execute_cycle(
             console.print("\n[bold yellow]========== STOPPED FOR HUMAN DECISION (NEEDS_HUMAN) ==========[/bold yellow]")
             console.print("One or more reviewers identified a spec ambiguity or product architecture conflict.")
             console.print(f"Review details saved in: {run_dir / 'spec-questions.txt'}")
-            console.print("Please review and resolve the question in .ai-cycle/spec.md before re-running.")
+            console.print(f"Resolve via ai-cycle spec --change {change} before re-running." if change else "Please review and resolve the question in .ai-cycle/spec.md before re-running.")
             return
 
         if clv != "PASS":

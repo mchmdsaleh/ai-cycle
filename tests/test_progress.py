@@ -25,7 +25,7 @@ class ProgressTests(unittest.TestCase):
             self.assertEqual(args[0][0:3], ["claude", "--model", "fast-model"])
             self.assertIn("--safe-mode", args[0])
             self.assertEqual(args[0][args[0].index("--tools") + 1], "")
-            self.assertEqual(kwargs["timeout"], 120)
+            self.assertEqual(kwargs["timeout"], 300)
             self.assertIn("SPEC:\nspec", kwargs["input_text"])
             self.assertEqual(result, "VERDICT: PASS")
 

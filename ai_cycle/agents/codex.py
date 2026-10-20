@@ -19,7 +19,7 @@ def codex_env() -> dict:
     return env
 
 
-def codex_plan_spec(request: str | None, input_path: Path | None, cwd: Path) -> str:
+def codex_plan_spec(request: str | None, input_path: Path | None, cwd: Path, *, planning_context: str | None = None) -> str:
     source = f"User request:\n{request}" if request else ""
     if input_path:
         source += f"\n\nInput artifact: {input_path.resolve()}"
@@ -34,6 +34,38 @@ spec Markdown; ai-cycle writes it to `.ai-cycle/spec.md` after you succeed.
 ## Current Input
 {source.strip()}
 """.strip()
+    if planning_context is not None:
+        prompt += f"""
+
+## OpenSpec Output Contract (overrides single spec output and file delivery)
+{planning_context}
+Return ONLY a JSON object, without code fences, with a `files` object mapping
+artifact relative paths to their complete text contents. Include proposal.md,
+design.md, wireframe.md, tasks.md, readiness.json and specs/<capability>/spec.md.
+Follow schema templates rather than the single-document output structure above.
+Use English headings and Indonesian explanations. Reconcile supplied answers
+across ALL artifacts, retaining explicit requirements and existing capability
+specs. Remove resolved questions. Preserve unresolved questions in proposal and
+readiness.json. readiness.json is a JSON string with status draft/ready and a
+blockers array; ready requires no unresolved material business decisions.
+Readiness applies to the explicitly selected implementation scope. If the user
+has deferred decisions AND all dependent requirements, retain them under
+deferredDecisions (not blockers). blockers contains only unresolved decisions
+required for the current scope. Set ready when that scope has no blockers;
+do not mark deferred decisions resolved or expand the agreed scope. Keep
+proposal/design status consistent with this scoped readiness. Do not move an
+active blocker to deferred without the user's explicit scope decision.
+Read related openspec/specs in the repository before writing delta requirements.
+For ADDED requirements, keep the description between the Requirement heading
+and its first Scenario at most 500 characters. Put examples, edge cases and
+details in scenarios, or split distinct behaviors into separate requirements.
+For MODIFIED requirements, preserve the complete existing requirement and all
+scenarios; do not remove behavior just to meet a length limit.
+If referenced review feedback concerns a different feature than this change,
+report the scope mismatch in proposal/readiness rather than adding unrelated
+requirements. A user answer alone does not authorize expanding feature scope.
+Do not implement source, mark acceptance as passed, or claim tests were run.
+"""
 
     with tempfile.TemporaryDirectory(prefix="ai-cycle-spec-") as td:
         output = Path(td) / "spec.md"
@@ -50,7 +82,7 @@ spec Markdown; ai-cycle writes it to `.ai-cycle/spec.md` after you succeed.
         return spec + "\n"
 
 
-def codex_implement(spec: str, rules: str, feedback: str | None, run_dir: Path, cwd: Path) -> str:
+def codex_implement(spec: str, rules: str, feedback: str | None, run_dir: Path, cwd: Path, *, task_path: Path | None = None, implementer: str = "codex") -> str:
     prompt = f"""
 You are the IMPLEMENTER in a controlled software-engineering cycle.
 
@@ -79,9 +111,18 @@ Constraints:
 
 At the end, give a concise summary of files changed and assumptions.
 """.strip()
+    if task_path is not None:
+        prompt += f"\nTrack implementation in {task_path}. Only mark tasks done after their verification succeeds. Preserve task descriptions. You may append verification notes under a final '## Implementation evidence' section, but must not modify other OpenSpec planning artifacts or archive the change."
 
-    cmd = ["codex", "exec", "--ephemeral", "--sandbox", "workspace-write", "-"]
-    p = run(cmd, cwd=cwd, input_text=prompt, env=codex_env(), output_path=run_dir / "implementer.txt")
+    if implementer == "codex":
+        cmd = ["codex", "exec", "--ephemeral", "--sandbox", "workspace-write", "-"]
+        env = codex_env()
+    elif implementer == "agy":
+        cmd = ["agy", "--print", "--mode", "accept-edits", "--sandbox", "--output-format", "text"]
+        env = os.environ.copy()
+    else:
+        die("Unknown implementer. Choose codex or agy.")
+    p = run(cmd, cwd=cwd, input_text=prompt, env=env, output_path=run_dir / "implementer.txt")
     if p.returncode != 0:
-        die("Codex implementer failed.")
+        die(f"{implementer} implementer failed. See {run_dir / 'implementer.txt'}")
     return p.stdout

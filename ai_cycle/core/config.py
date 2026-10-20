@@ -6,6 +6,7 @@ from pathlib import Path
 from ai_cycle.core.runner import die
 
 DEFAULT_CONFIG = {
+    "implementer": "codex",
     "max_attempts": 2,
     "base_branch": None,
     "review_model": "kr/claude-opus-5",
