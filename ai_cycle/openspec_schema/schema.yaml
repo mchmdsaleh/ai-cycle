@@ -30,7 +30,7 @@ artifacts:
     generates: tasks.md
     description: Implementation and verification checklist
     template: tasks.md
-    instruction: Use numbered unchecked tasks with verification per task. Scale to complexity. Preserve already completed tasks on revision unless the new requirement invalidates them. Archive/UAT follow-up must not imply tests were performed.
+    instruction: Use numbered unchecked tasks with verification per task and traceability to active requirement headings/paths. Separate source implementation and source checks from installed ORM/browser/migration/UAT. Preserve checked history only when evidence still matches current requirements. Explicitly reopen stale tasks after scope changes. Never gate all independent coding on runtime access. Archive/UAT follow-up must not imply tests were performed.
     requires: [specs, design, wireframe]
   - id: readiness
     generates: readiness.json
@@ -41,4 +41,4 @@ artifacts:
 apply:
   requires: [tasks, readiness]
   tracks: tasks.md
-  instruction: Read readiness.json; stop for draft or blockers. Implement the requirements and pending tasks. Mark only verified completed tasks. Preserve requirements and do not archive automatically.
+  instruction: Read readiness.json; stop for draft or active business blockers. Implement every active requirement, not merely the changed subset. Track per-requirement implemented/partial/missing/unverified with real source evidence and separate verification. Pending runtime delays only dependent work; continue independent source tasks. Report permission failures without bypass or claiming service absence from sandbox failure. Mark only verified completed tasks. Preserve requirements and do not archive automatically. AI Cycle requires completion.json covering the entire supplied inventory before independent review can pass.

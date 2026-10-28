@@ -31,6 +31,47 @@ Identifikasi tujuan bisnis, versi/edition Odoo, module, scope, serta assignee ji
 - Jika informasi yang hilang mengubah hasil bisnis, akses data, atau scope secara material, tulis bagian yang sudah jelas dan ajukan pertanyaan minimum yang diperlukan. Status spec tetap Draft sampai blocker terselesaikan.
 - Jangan mengubah ketidakpastian menjadi klaim "tidak perlu migration/tests" atau "backward compatible". Jelaskan berdasarkan dampak aktual.
 
+## Blocker Explanation and Decision Options
+
+Untuk setiap blocker aktif, jangan hanya menulis pertanyaan teknis/TBC:
+- Beri ID stabil, pertahankan ID existing saat revisi, dan judul singkat.
+- Jelaskan Masalah, Mengapa Memblokir, Dampak, dan Contoh Kasus konkret dalam
+  Bahasa Indonesia. Sebutkan requirement/artefak yang terdampak dan bukti dari
+  lampiran/source jika tersedia; pisahkan fakta terverifikasi dari usulan.
+- Pecah keputusan independen menjadi pertanyaan terpisah dengan ID seperti
+  D1.1, D1.2. Jangan menggabungkan beberapa keputusan dalam satu pilihan.
+- Untuk setiap pertanyaan berikan 2-3 opsi A/B/C yang saling eksklusif, masing-
+  masing dengan arti dan konsekuensi bisnis/teknis. Izinkan jawaban custom.
+- Tandai Recommended hanya jika ada dasar requirement/source atau trade-off
+  eksplisit; jelaskan alasannya. Rekomendasi bukan keputusan atau default yang
+  boleh diimplementasikan tanpa jawaban user.
+- Jangan memaksa opsi palsu yang mengabaikan alternatif sah. Jika belum cukup
+  bukti untuk opsi yang bermakna, tanyakan fakta minimum yang dibutuhkan.
+- Jangan membuka kembali keputusan final, memasukkan deferred sebagai blocker
+  aktif, atau menyalin keputusan D1-D7 dari contoh fitur lain.
+- Akhiri dengan format jawaban cepat, misalnya `D1.1 A; D1.2 B`, dan jelaskan
+  bagaimana jawaban diselaraskan ke seluruh artifact terkait.
+- Dalam mode OpenSpec, tempatkan penjelasan dan pertanyaan siap jawab di bagian
+  `## Open Questions` proposal.md. readiness.json tetap gate terstruktur:
+  pertahankan id/question, tambah why_blocking, affected_scope, evidence dan
+  questions berisi id/question/options. Setiap option punya id/label/consequence;
+  recommendation_reason opsional. Gunakan ID yang sama dengan proposal.
+- Dalam spec legacy, letakkan format ini pada Additional Notes.
+
+Contoh struktur (isi sesuai fitur aktual):
+
+### D1 - Department Source
+Masalah: department pembuat berbeda dari requester.
+Mengapa Memblokir: sumber department menentukan quota dan routing yang dibangun.
+Dampak: jumlah terpakai dan tujuan distribusi bisa berbeda.
+Contoh Kasus: Finance membuat PR untuk karyawan HR.
+
+#### D1.1 - Department mana yang digunakan?
+- A: Department requester. Konsekuensi: quota mengikuti pemilik kebutuhan.
+- B: Department pembuat. Konsekuensi: quota mengikuti user yang menginput.
+
+Format jawaban: D1.1 A. Contoh ini bukan requirement atau rekomendasi default.
+
 ## Required Output Structure
 
 Gunakan Markdown biasa, bukan seluruh dokumen di dalam code fence. Heading tetap berbahasa Inggris; penjelasan menggunakan Bahasa Indonesia kecuali user meminta bahasa lain.
@@ -106,6 +147,39 @@ Cantumkan asumsi, pertanyaan terbuka/blocker, dependency, dampak upgrade/migrati
 - Jangan mengusulkan bypass ACL/record rules sebagai solusi tampilan atau performa.
 
 ## File & Delivery Rules
+
+### Requirement Traceability and Completion
+
+- Untuk scope besar dalam OpenSpec, bagi capability specs berdasarkan perilaku
+  bisnis yang kohesif agar bisa menjadi work package --package. Jangan menumpuk
+  seluruh fitur dalam satu capability atau menghapus requirement untuk mengecilkan
+  konteks. Catat dependency antarcapability, kontrak model/field/interface bersama,
+  source tasks, focused checks dan tes integrasi lintas package pada design/tasks.
+- Ukuran konteks package mencakup proposal, design, wireframe dan capability spec.
+  Pisahkan catatan historis panjang dari kontrak aktif. Revisi capability existing
+  harus tetap mempertahankan requirement dan skenario yang masih berlaku.
+- Lolos satu package bukan acceptance seluruh change. Pisahkan package source
+  review, runtime verification dan acceptance/integration seluruh fitur.
+
+- Artifact berisi requirement, keputusan dan bukti, bukan command invocation
+  aktif untuk sesi berikutnya. Jangan memasukkan dollar-prefixed skill commands,
+  "Using change ... override ...", atau instruksi planning-only sebagai aturan
+  operasional yang menghalangi implementer. Simpan riwayat sebagai penjelasan.
+
+- Beri requirement aktif heading unik dan scope eksplisit. Kaitkan tasks ke
+  requirement/acceptance criteria, termasuk model, field, view, security dan callers.
+- Pisahkan source implementation, source regression, installed ORM/browser,
+  legacy audit/migration dan UAT. Test tertulis bukan test yang sudah dijalankan.
+- Perubahan requirement harus membuka kembali task/evidence lama yang tidak lagi
+  sesuai. Jangan menjaga checkbox selesai untuk kontrak fitur yang sudah berubah.
+- Planning ready bukan implemented atau verified. Report per requirement harus
+  membedakan implemented/partial/missing/unverified; deferred hanya jika user
+  menyetujui penundaan beserta requirement dependennya.
+- Akses runtime yang belum tersedia menunda verifikasi/integration terkait, bukan
+  otomatis seluruh source implementation yang dapat dikerjakan dari API source.
+- Diff yang benar tetapi parsial belum memenuhi seluruh scope aktif. Jangan
+  menyamakan exit sukses agent, tidak adanya temuan reviewer, atau checkbox
+  planning dengan bukti seluruh requirement selesai.
 
 - Default output: `spec.md` pada lokasi yang ditentukan user atau root workspace aktif.
 - Jika spec.md sudah ada, baca dahulu. Revisi file tersebut hanya bila request membahas fitur yang sama atau user meminta penggantian.

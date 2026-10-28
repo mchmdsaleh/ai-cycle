@@ -60,12 +60,19 @@ def _run_summary(run_dir: Path) -> dict:
     terminal_feedback = (run_dir / "terminal-feedback.txt").exists()
     spec_questions = any((a / "spec-questions.txt").exists() for a in attempts)
 
-    if spec_questions:
+    outcome = None
+    try:
+        outcome = json.loads((run_dir / "result.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        pass
+    if outcome:
+        result = {"passed": "✅ PASS", "failed": "❌ FAIL", "partial": "PARTIAL", "needs_human": "🟡 NEEDS_HUMAN", "awaiting_verification": "VERIFICATION PENDING", "package_reviewed": "PACKAGE REVIEWED - INTEGRATION PENDING", "incomplete": "INCOMPLETE"}.get(outcome.get("status"), "❓ UNKNOWN")
+    elif spec_questions:
         result = "🟡 NEEDS_HUMAN"
     elif terminal_feedback:
         result = "❌ FAIL"
-    elif attempts and not (run_dir / "feedback.txt").exists():
-        result = "✅ PASS"
+    elif attempts:
+        result = "LEGACY UNVERIFIED"
     else:
         result = "❓ UNKNOWN"
 
@@ -122,7 +129,7 @@ def render_run_details(run_id: str, root: Path | None = None):
 
     for attempt_dir in sorted(run_dir.glob("attempt-*")):
         console.print(f"\n[bold]{attempt_dir.name}[/bold]")
-        for fname in ("implementer.txt", "review-copilot.txt", "review-claude.txt", "validation.txt", "feedback.txt", "spec-questions.txt"):
+        for fname in ("implementer.txt", "target.json", "target-result.json", "work-items.json", "checkpoint.json", "package-checkpoint.json", "completion.json", "completion-check.json", "verification-pending.json", "review-coverage.json", "review-claude.txt", "validation.txt", "feedback.txt", "spec-questions.txt"):
             fpath = attempt_dir / fname
             if fpath.exists():
                 console.print(f"  [dim]{fpath}[/dim]")

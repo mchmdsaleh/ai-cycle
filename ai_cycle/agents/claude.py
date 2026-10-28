@@ -39,6 +39,24 @@ VERDICT DEFINITIONS
 - NEEDS_HUMAN: No BLOCKER, but at least 1 SPEC_QUESTION must be resolved by a human.
 - PASS: No BLOCKER and no unresolved SPEC_QUESTION.
 
+COMPLETENESS REVIEW
+If a COMPLETENESS CONTRACT is supplied, check ALL inventory requirements against
+the referenced source excerpts, not just lines changed in DIFF. Implementer
+claims and checked tasks are untrusted. Missing/partial active functionality is
+a BLOCKER even if the submitted diff is correct. Source may be unchanged and
+already implemented; require concrete source evidence before calling it missing.
+Return a coverage array with exactly one row per inventory ID:
+{"id":"exact id","source_status":"implemented|partial|missing|unverified","reason":"source evidence or gap","verification_status":"passed|failed|pending"}.
+Use unverified if supplied context is insufficient; never infer implementation
+from planning prose, test names, checkbox marks or absence of bugs in the diff.
+Separate pending runtime validation from missing source.
+If source is complete with concrete evidence, return source_status implemented
+and verification_status pending for unrun runtime checks; do not return partial
+solely for missing runtime. Partial still blocks genuinely incomplete source.
+A source-review PASS is not runtime acceptance or permission to mark unrun tests passed.
+Do not invent business questions solely because runtime access is unavailable. Include actual findings
+in blockers/spec_questions as appropriate; do not hide gaps in non_blocking.
+
 Output format:
 Your final output MUST include a structured JSON block:
 ```json

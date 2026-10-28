@@ -51,7 +51,7 @@ def resolve_base_branch(root: Path, base_branch: str | None = None) -> str:
     die(f"Could not resolve a base branch to diff against (tried: {candidates}).")
 
 
-def get_diff(root: Path, base_branch: str | None = None) -> str:
+def get_diff(root: Path, base_branch: str | None = None, *, allow_empty: bool = False) -> str:
     diff_base = "HEAD"
     if base_branch:
         base_ref = resolve_base_branch(root, base_branch)
@@ -80,7 +80,7 @@ def get_diff(root: Path, base_branch: str | None = None) -> str:
             chunks.append(p.stdout)
 
     text = "\n".join(chunks)
-    if not text.strip():
+    if not text.strip() and not allow_empty:
         die("Implementer produced no changes and no diff found against base branch.")
     return text
 

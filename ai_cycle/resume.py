@@ -11,7 +11,7 @@ def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def load_previous_feedback(runs: Path, current_run: Path, spec: str, branch: str) -> dict | None:
+def load_previous_feedback(runs: Path, current_run: Path, spec: str, branch: str, *, package: str | None = None) -> dict | None:
     """Find the most recent prior run on the same branch/spec that has terminal feedback."""
     if not runs.exists():
         return None
@@ -41,6 +41,8 @@ def load_previous_feedback(runs: Path, current_run: Path, spec: str, branch: str
 
         # Prevent feedback from an old spec
         if metadata.get("spec_hash") != current_spec_hash:
+            continue
+        if metadata.get("package") != package:
             continue
 
         return {

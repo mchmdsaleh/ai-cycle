@@ -52,6 +52,12 @@ PERINTAH HARIAN
   run biasa tidak membawa feedback lama atau menghapus perubahan sebelumnya.
 
 SPEC GENERATOR
+  Spec besar: pilih capability di openspec/changes/<change>/specs/.
+  ai-cycle run --change c1 --package purchase-request-rfq --implementer agy
+  Tambahkan --resume untuk melanjutkan package yang sama pada branch/spec sama.
+  Package hanya mengirim scope terpilih + shared design, bukan semua task history.
+  package_validation_commands di config dapat menentukan focused checks per package.
+  PACKAGE REVIEWED masih membutuhkan verifikasi runtime dan integrasi full change.
   ai-cycle spec "Buat fitur..." --change nama-fitur   Buat/revisi OpenSpec
   ai-cycle run --change nama-fitur --allow-dirty     Implement OpenSpec
   Jalankan dari root repository Git:
@@ -77,6 +83,8 @@ PILIH IMPLEMENTER
   Flag yang sama berlaku pada legacy run tanpa --change.
   agy harus terpasang dan sudah login; model mengikuti konfigurasi agy.
   Mode agy: print + accept-edits + sandbox; permission tidak di-bypass.
+  Headless command memerlukan toolPermission: proceed-in-sandbox di settings agy
+  atau allow-rules command terbatas. Mode auto tidak tersedia pada semua akun.
   Planner spec tetap Codex, reviewer tetap Claude. Log: implementer.txt.
 
 OPENSPEC (install: npm install -g @fission-ai/openspec)
@@ -114,6 +122,22 @@ PANTAU PROSES
   cat .ai-cycle/runs/<run-id>/attempt-1/feedback.txt
 
 HASIL DAN LANGKAH BERIKUTNYA
+  OpenSpec run memeriksa semua requirement, bukan hanya diff:
+  requirements.json -> attempt-N/completion.json -> review-coverage.json.
+  source_status: implemented/partial/missing/unverified beserta file/line.
+  verification_status: passed/failed/pending; runtime pending bukan gap source.
+  work-items.json mengelompokkan gap; checkpoint.json membawa report terakhir.
+  --resume memakai checkpoint yang kompatibel, bukan melanjutkan proses lama.
+  Agent diarahkan menyimpan report setelah tiap kelompok pekerjaan.
+  target.json: requirement wajib untuk panggilan implementer saat itu.
+  Target selesai -> lanjut gap berikutnya selama budget attempt tersedia.
+  Target belum selesai -> langsung berhenti; baca target-result.json.
+  Cleanup requirement lain tidak menggantikan target yang belum selesai.
+  Gap aktif memicu feedback/retry; laporan hilang tidak dapat lolos PASS.
+  PARTIAL              Source requirement belum lengkap.
+  VERIFICATION PENDING Source review selesai, tasks/test belum terverifikasi.
+  INCOMPLETE           Run berhenti sebelum hasil final; bukan PASS.
+  Legacy history tanpa result.json tidak dianggap PASS otomatis.
   PASS              Cek aplikasi dan git diff, lalu commit sendiri.
   CHANGES_REQUIRED  Baca blocker; lanjut dengan --resume --allow-dirty.
   NEEDS_HUMAN       Baca spec-questions.txt, perjelas spec, jalankan lagi.
@@ -157,12 +181,29 @@ def spec(
         if (path / "readiness.json").exists():
             existing.append(path / "readiness.json")
         context += "\n\nExisting artifacts to reconcile:\n" + "\n\n".join(f"{item.relative_to(path)}:\n{item.read_text()}" for item in existing)
+        response_path = get_project_paths(root)["state"] / "planning" / change / "planner-response.txt"
         with console.status("[bold]Planning OpenSpec change with Codex..."):
-            generated = codex_plan_spec(request, input_path, root, planning_context=context)
+            generated = codex_plan_spec(request, input_path, root, planning_context=context, response_path=response_path)
         save_artifacts(path, generated)
         openspec(root, "validate", change, "--strict")
         console.print(f"[green]OpenSpec change written:[/green] {path}")
-        console.print((path / "readiness.json").read_text())
+        import json
+        import re
+        from rich.markdown import Markdown
+
+        readiness = json.loads((path / "readiness.json").read_text())
+        console.print(f"Planning status: {readiness['status']} | Active blockers: {len(readiness['blockers'])}")
+        if readiness["blockers"]:
+            proposal = (path / "proposal.md").read_text()
+            section = re.search(r"(?m)^## Open Questions\s*$", proposal)
+            if section:
+                questions = re.split(r"(?m)^## ", proposal[section.end():], maxsplit=1)[0].strip()
+                if questions:
+                    console.print(Markdown(questions))
+            else:
+                console.print(json.dumps(readiness["blockers"], indent=2, ensure_ascii=False), markup=False)
+            console.print(f"Jawab lewat: ai-cycle spec 'Jawaban: <ID> <opsi>; ...' --change {change}")
+        console.print(f"Readiness details: {path / 'readiness.json'}")
         return
     with console.status("[bold]Planning spec with Codex...[/bold]"):
         generated = codex_plan_spec(request, input_path, root)
@@ -178,11 +219,12 @@ def run(
     max_attempts: Optional[int] = typer.Option(None, help="Override max attempts"),
     change: Optional[str] = typer.Option(None, "--change", help="Implement this OpenSpec change"),
     implementer: Optional[str] = typer.Option(None, "--implementer", help="Override implementer: codex or agy"),
+    package: Optional[str] = typer.Option(None, "--package", help="Run/review one OpenSpec capability; full-change integration remains required"),
 ):
     """🚀 Run the AI coding cycle"""
     from ai_cycle.orchestrator import execute_cycle
 
-    execute_cycle(resume=resume, allow_dirty=allow_dirty, max_attempts=max_attempts, change=change, implementer=implementer)
+    execute_cycle(resume=resume, allow_dirty=allow_dirty, max_attempts=max_attempts, change=change, implementer=implementer, package=package)
 
 
 @app.command()

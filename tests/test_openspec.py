@@ -20,6 +20,49 @@ def payload():
 
 
 class OpenSpecTests(unittest.TestCase):
+    def test_schema_array_is_saved_and_duplicate_paths_are_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = change_path(Path(td), "payment-export")
+            entries = [{"path": name, "content": content} for name, content in payload()["files"].items()]
+            with patch("ai_cycle.core.openspec.openspec"):
+                save_artifacts(path, json.dumps({"files": entries}))
+            before = (path / "proposal.md").read_text()
+            entries.append({"path": "proposal.md", "content": "replacement"})
+            with self.assertRaises(SystemExit):
+                save_artifacts(path, json.dumps({"files": entries}))
+            self.assertEqual((path / "proposal.md").read_text(), before)
+
+    def test_omitted_existing_capability_specs_are_preserved_unchanged(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = change_path(Path(td), "payment-export")
+            second_spec = "specs/payment-approval/spec.md"
+            with patch("ai_cycle.core.openspec.openspec"):
+                save_artifacts(path, json.dumps(payload()))
+                (path / second_spec).parent.mkdir(parents=True)
+                (path / second_spec).write_text("existing approval capability\n\n")
+
+                revised = payload()
+                revised["files"].pop(second_spec, None)
+                save_artifacts(path, json.dumps(revised))
+
+            self.assertEqual((path / second_spec).read_text(), "existing approval capability\n\n")
+
+    def test_empty_planner_response_is_saved_and_existing_artifacts_are_preserved(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            path = change_path(root, "payment-export")
+            path.mkdir(parents=True)
+            (path / "design.md").write_text("existing design")
+
+            with patch("ai_cycle.core.openspec.die", side_effect=SystemExit(1)) as die:
+                with self.assertRaises(SystemExit):
+                    save_artifacts(path, "")
+
+            raw = root / ".ai-cycle/planning/payment-export/planner-response.txt"
+            self.assertEqual(raw.read_text(), "")
+            self.assertIn(str(raw), die.call_args.args[0])
+            self.assertEqual((path / "design.md").read_text(), "existing design")
+
     def test_validation_and_traversal_leave_existing_artifacts_intact(self):
         with tempfile.TemporaryDirectory() as td:
             path = change_path(Path(td), "payment-export")
@@ -86,8 +129,17 @@ class OpenSpecTests(unittest.TestCase):
             path = change_path(root, "payment-export")
             with patch("ai_cycle.core.openspec.openspec"):
                 save_artifacts(path, json.dumps(payload()))
-                with patch("ai_cycle.orchestrator.require_commands"), patch("ai_cycle.orchestrator.assert_git_repo"), patch("ai_cycle.orchestrator.assert_clean_worktree"), patch("ai_cycle.orchestrator.current_branch", return_value="main"), patch("ai_cycle.orchestrator.codex_implement") as implement, patch("ai_cycle.orchestrator.get_diff", return_value="code diff"), patch("ai_cycle.orchestrator.claude_review", return_value="VERDICT: PASS") as reviewer:
+                def complete(*args, **kwargs):
+                    (root / "application.py").write_text("def export():\n    return 'csv'\n")
+                    inventory = kwargs['inventory']
+                    report = {"requirements": [{"id": row['id'], "status": "implemented", "evidence": [{"path": "application.py", "line": 1, "end_line": 2}]} for row in inventory]}
+                    (args[3] / "completion.json").write_text(json.dumps(report))
+                identifier = "specs/payment-export/spec.md::Export payments"
+                verdict = json.dumps({"verdict": "PASS", "coverage": [{"id": identifier, "status": "implemented"}]})
+                with patch("ai_cycle.orchestrator.require_commands"), patch("ai_cycle.orchestrator.assert_git_repo"), patch("ai_cycle.orchestrator.assert_clean_worktree"), patch("ai_cycle.orchestrator.current_branch", return_value="main"), patch("ai_cycle.orchestrator.codex_implement", side_effect=complete) as implement, patch("ai_cycle.orchestrator.get_diff", return_value="code diff"), patch("ai_cycle.orchestrator.claude_review", return_value=verdict) as reviewer:
                     execute_cycle(root=root, change="payment-export")
                     self.assertEqual(implement.call_args.kwargs["task_path"], path / "tasks.md")
                     self.assertIn("Artifact: specs/payment-export/spec.md", reviewer.call_args.args[0])
                     self.assertFalse((state / "spec.md").exists())
+                    outcome = json.loads(next((state / "runs").glob("*/result.json")).read_text())
+                    self.assertEqual(outcome['status'], 'awaiting_verification')

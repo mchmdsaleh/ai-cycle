@@ -5,49 +5,29 @@ import json
 VERDICTS = ("PASS", "CHANGES_REQUIRED", "NEEDS_HUMAN")
 
 
-def parse_verdict(text: str) -> str:
-    """Extract a verdict from reviewer output: JSON block first, then fuzzy fallback."""
+def review_json(text: str) -> dict | None:
     try:
         if "```json" in text:
-            json_str = text.split("```json")[1].split("```")[0].strip()
-            data = json.loads(json_str)
-            v = str(data.get("verdict", "")).strip().upper()
-            if v in VERDICTS:
-                return v
-            if "REJECT" in v or "FAIL" in v or "CHANGES" in v:
-                return "CHANGES_REQUIRED"
-        elif "{" in text and "}" in text:
-            start = text.find("{")
-            end = text.rfind("}")
-            data = json.loads(text[start:end + 1])
-            v = str(data.get("verdict", "")).strip().upper()
-            if v in VERDICTS:
-                return v
-            if "REJECT" in v or "FAIL" in v or "CHANGES" in v:
-                return "CHANGES_REQUIRED"
-    except Exception:
-        pass
+            data = json.loads(text.split("```json", 1)[1].split("```", 1)[0].strip())
+        else:
+            data = json.loads(text[text.index("{"):text.rindex("}") + 1])
+        return data if isinstance(data, dict) else None
+    except (ValueError, TypeError):
+        return None
 
-    for line in reversed(text.splitlines()):
-        u_line = line.strip().upper()
-        if "VERDICT: PASS" in u_line or u_line == "PASS":
-            return "PASS"
-        if "VERDICT: NEEDS_HUMAN" in u_line or u_line == "NEEDS_HUMAN" or "NEEDS_HUMAN" in u_line:
-            return "NEEDS_HUMAN"
-        if (
-            "VERDICT: CHANGES_REQUIRED" in u_line
-            or u_line == "CHANGES_REQUIRED"
-            or "CHANGES_REQUIRED" in u_line
-            or "REJECT" in u_line
-        ):
+
+def parse_verdict(text: str) -> str:
+    """Require an explicit verdict; prose containing PASS is not acceptance evidence."""
+    data = review_json(text)
+    if data is not None:
+        verdict = str(data.get("verdict", "")).strip().upper()
+        if data.get("blockers"):
             return "CHANGES_REQUIRED"
-
-    upper_text = text.upper()
-    if "CHANGES_REQUIRED" in upper_text or "REJECT" in upper_text or "FAIL" in upper_text or "BLOCKER" in upper_text:
-        return "CHANGES_REQUIRED"
-    if "NEEDS_HUMAN" in upper_text or "SPEC_QUESTION" in upper_text:
-        return "NEEDS_HUMAN"
-    if "PASS" in upper_text:
-        return "PASS"
-
+        if data.get("spec_questions"):
+            return "NEEDS_HUMAN"
+        return verdict if verdict in VERDICTS else "UNKNOWN"
+    for line in reversed(text.splitlines()):
+        verdict = line.strip().upper().removeprefix("VERDICT: ")
+        if verdict in VERDICTS:
+            return verdict
     return "UNKNOWN"

@@ -13,10 +13,51 @@ from ai_cycle.core.git import get_diff
 from ai_cycle.core.runner import run
 from ai_cycle.agents.claude import claude_review
 from ai_cycle.orchestrator import build_feedback, execute_cycle
-from ai_cycle.ui.progress import CycleProgress
+from ai_cycle.ui.progress import CycleProgress, _format_log_line
 
 
 class ProgressTests(unittest.TestCase):
+    def test_agy_stream_events_render_as_live_text(self):
+        self.assertEqual(_format_log_line('{"event":"init"}'), "Agy session started")
+        self.assertEqual(_format_log_line('{"event":"step_update","step_update":{"step_type":"agent_response","state":"ACTIVE","text_delta":"Working"}}'), "Working")
+        self.assertEqual(_format_log_line('{"event":"result","result":{"status":"SUCCESS"}}'), "Agy SUCCESS")
+
+    def test_agy_tool_events_show_tool_and_result_summary(self):
+        event = '{"event":"step_update","step_update":{"step_type":"tool","tool_name":"read_file","state":"DONE","tool_info":{"parameters":{"Path":"/repo/models/example.py"},"output":"20 lines, 300 bytes"}}}'
+        self.assertEqual(_format_log_line(event), "Agy read_file: example.py")
+        event = '{"event":"step_update","step_update":{"step_type":"tool","tool_name":"run_command","state":"DONE","tool_info":{"output":"Command exited with code 1\\nFAILED (failures=1, errors=1)"}}}'
+        self.assertEqual(_format_log_line(event), "Agy run_command: FAILED (failures=1, errors=1)")
+
+    def test_coverage_numbers_visible_with_and_without_terminal(self):
+        counts = {'implemented': 43, 'partial': 23, 'missing': 3, 'unverified': 2}
+        for terminal in (True, False):
+            console = Console(file=io.StringIO(), force_terminal=terminal, width=48)
+            progress = CycleProgress(console)
+            progress.add_stage('Scope Coverage')
+            progress.set_coverage(counts, 71)
+            caption = progress.render().caption.plain
+            for expected in ('43/71 implemented (61%)', 'Partial: 23', 'Missing: 3', 'Unverified: 2'):
+                self.assertIn(expected, caption)
+            self.assertNotIn('Unreported', caption)
+            console.print(progress.render())
+            self.assertIn('43/71', console.file.getvalue())
+            self.assertIn('Missing: 3', console.file.getvalue())
+
+    def test_invalid_report_does_not_reuse_previous_counts_or_show_json_brace(self):
+        progress = CycleProgress(Console(file=io.StringIO(), force_terminal=True))
+        progress.set_coverage({'implemented': 71}, 71)
+        progress.set_coverage({}, 71)
+        with tempfile.TemporaryDirectory() as td:
+            progress.log_path = Path(td) / 'completion.json'
+            progress.log_path.write_text('}\n')
+            caption = progress.render().caption.plain
+        self.assertIn('report unavailable (missing/invalid)', caption)
+        self.assertNotIn('0/71', caption)
+        self.assertIn('Unreported: 71', caption)
+        self.assertNotIn('}', caption)
+        progress.set_coverage({}, 0)
+        self.assertIn('0/0 implemented (0%)', progress.render().caption.plain)
+
     def test_claude_review_is_one_shot_and_has_timeout(self):
         with tempfile.TemporaryDirectory() as td, patch("ai_cycle.agents.claude.run") as run_claude:
             run_claude.return_value = subprocess.CompletedProcess([], 0, "VERDICT: PASS")
